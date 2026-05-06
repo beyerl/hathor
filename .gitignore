@@ -1,0 +1,38 @@
+### Android / Gradle ###
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+### Kotlin / Java ###
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+### Generated APK / AAB ###
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+
+### Gradle wrapper (we don't vendor the JAR — bootstrapped via `gradle wrapper`) ###
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+gradlew.bat
+
+### NDK / native ###
+*.so
+
+### Chaquopy build artifacts ###
+**/python/build/
+
+### Local IDE / VCS junk ###
+.vscode/
+*.swp
+Thumbs.db

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Solid black square inset, with a white "H" cut out via path-fill -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M30,30 L78,30 L78,78 L30,78 Z" />
+
+    <!-- "H" letterform, white on the black square -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,40 L46,40 L46,52 L62,52 L62,40 L68,40 L68,68 L62,68 L62,58 L46,58 L46,68 L40,68 Z" />
+</vector>
