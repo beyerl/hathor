@@ -93,7 +93,10 @@ class FFmpegTranscoder @Inject constructor(
             false,                        // VBR off → CBR
         )
         try {
-            val mp3Buf = ByteArray(encoder.mp3BufferSize)
+            // Generous fixed buffer: at 320 kbps the MP3 is smaller than the PCM input, so any
+            // single MediaCodec output chunk fits comfortably. Avoids depending on jump3r's
+            // (build-dependent) buffer-size accessor.
+            val mp3Buf = ByteArray(64 * 1024)
             val info = MediaCodec.BufferInfo()
             val timeoutUs = 10_000L
             var inputDone  = false
