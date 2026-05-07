@@ -20,7 +20,7 @@ okhttp = "4.12.0"
 # FFmpegKit is currently stubbed (see FFmpegTranscoder.kt). Original arthenica artifact
 # was delisted from Maven Central when the repo was archived in early 2025. Re-introduce
 # a maintained fork here when one is available.
-jaudiotagger = "3.0.1.0"
+jaudiotagger = "3.0.1"
 
 junit = "4.13.2"
 junitExt = "1.2.1"
@@ -58,8 +58,8 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 okhttp        = { group = "com.squareup.okhttp3", name = "okhttp",         version.ref = "okhttp" }
 okhttp-logging= { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 
-# Jaudiotagger — maintained Android-friendly fork; preserves org.jaudiotagger.* packages.
-jaudiotagger = { group = "dev.brachtendorf", name = "jaudiotagger", version.ref = "jaudiotagger" }
+# Jaudiotagger — official maintained fork (jthink) on Maven Central; preserves org.jaudiotagger.* packages.
+jaudiotagger = { group = "net.jthink", name = "jaudiotagger", version.ref = "jaudiotagger" }
 
 junit                 = { group = "junit",            name = "junit",            version.ref = "junit" }
 androidx-junit-ext    = { group = "androidx.test.ext", name = "junit",           version.ref = "junitExt" }
