@@ -19,7 +19,7 @@ object DatabaseModule {
     @Provides @Singleton
     fun provideDb(@ApplicationContext ctx: Context): HathorDatabase =
         Room.databaseBuilder(ctx, HathorDatabase::class.java, "hathor.db")
-            .fallbackToDestructiveMigration(true)
+            .fallbackToDestructiveMigration()
             .build()
 
     @Provides fun providePlaylistDao(db: HathorDatabase): PlaylistDao = db.playlists()
