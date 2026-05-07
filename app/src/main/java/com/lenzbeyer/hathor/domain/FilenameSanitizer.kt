@@ -8,10 +8,8 @@ object FilenameSanitizer {
     private val multiWhitespace = Regex("\\s+")
 
     fun sanitize(name: String): String {
-        val filtered = name.filter { it.isLetterOrDigit() || it in " -_" }
-        return multiWhitespace.replace(filtered, " ")
-            .trimStart('.')
-            .trim()
+        val replaced = name.map { if (it.isLetterOrDigit() || it in " -_") it else ' ' }.joinToString("")
+        return multiWhitespace.replace(replaced, " ").trim()
     }
 
     /** SPEC §8.3 — `NN Artist - Title.mp3` (or `NN - Title.mp3` if artist blank). */
