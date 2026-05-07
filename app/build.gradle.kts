@@ -112,6 +112,7 @@ dependencies {
     implementation(libs.okhttp.logging)
 
     implementation(libs.jaudiotagger)
+    implementation(libs.jump3r)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
