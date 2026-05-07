@@ -13,7 +13,7 @@ class TrackStatusConverters {
 
 @Database(
     entities = [PlaylistEntity::class, TrackEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(TrackStatusConverters::class)

@@ -1,6 +1,7 @@
 package com.lenzbeyer.hathor.media
 
 import android.content.Context
+import android.net.Uri
 import com.lenzbeyer.hathor.data.PlaylistRepository
 import com.lenzbeyer.hathor.data.TrackEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -12,13 +13,9 @@ import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.id3.ID3v23Tag
-import org.jaudiotagger.tag.images.ArtworkFactory
+import org.jaudiotagger.tag.images.StandardArtwork
+import org.jaudiotagger.tag.reference.PictureTypes
 
-/**
- * Writes ID3 v2.3 tags via Jaudiotagger (SPEC §10.1 Tagging step).
- *
- * APIC cover art is read from the playlist folder.jpg cached path.
- */
 @Singleton
 class ID3Tagger @Inject constructor(
     @ApplicationContext private val ctx: Context,
@@ -37,15 +34,26 @@ class ID3Tagger @Inject constructor(
         playlist.genre?.let { tag.setField(FieldKey.GENRE, it) }
         tag.setField(FieldKey.TRACK, "${track.index}/${track.trackTotal}")
 
-        // APIC cover from local cached folder.jpg, if present.
-        val coverFile = File(ctx.cacheDir, "covers/${track.playlistId}.jpg")
-        if (coverFile.exists() && coverFile.length() > 0) {
+        val coverBytes = readCoverBytes(playlist.coverJpgUri)
+        if (coverBytes != null && coverBytes.isNotEmpty()) {
             tag.deleteArtworkField()
-            val artwork = ArtworkFactory.createArtworkFromFile(coverFile)
+            val artwork = StandardArtwork().apply {
+                binaryData = coverBytes
+                mimeType = "image/jpeg"
+                description = ""
+                pictureType = PictureTypes.DEFAULT_ID
+            }
             tag.setField(artwork)
         }
 
         audioFile.tag = tag
         AudioFileIO.write(audioFile)
+    }
+
+    private fun readCoverBytes(uri: String?): ByteArray? {
+        if (uri.isNullOrBlank()) return null
+        return runCatching {
+            ctx.contentResolver.openInputStream(Uri.parse(uri))?.use { it.readBytes() }
+        }.getOrNull()
     }
 }

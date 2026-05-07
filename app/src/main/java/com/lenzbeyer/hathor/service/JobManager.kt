@@ -1,9 +1,16 @@
 package com.lenzbeyer.hathor.service
 
+import android.content.Context
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import com.lenzbeyer.hathor.data.PlaylistRepository
+import com.lenzbeyer.hathor.data.SafStorage
 import com.lenzbeyer.hathor.data.SettingsRepository
 import com.lenzbeyer.hathor.data.TrackEntity
+import com.lenzbeyer.hathor.domain.FilenameSanitizer
 import com.lenzbeyer.hathor.domain.TrackStatus
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -15,8 +22,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 data class JobState(
     val playlistId: String? = null,
@@ -27,21 +37,16 @@ data class JobState(
     val activeTrackId: String? = null,
 )
 
-/**
- * Orchestrates the per-track pipeline (SPEC §10). Concurrency via Semaphore. Pause/cancel
- * cooperate via the SupervisorJob — running tasks finish their current step then exit.
- *
- * NOTE: actual yt-dlp/FFmpegKit/Tagger calls are skeletons in v0.1; they update Track status
- * through the repository so the UI flows render correctly. Wiring real audio fetch + transcode
- * + tag is the next milestone after this skeleton lands.
- */
 @Singleton
 class JobManager @Inject constructor(
+    @ApplicationContext private val ctx: Context,
     private val repo: PlaylistRepository,
     private val settings: SettingsRepository,
     private val ytDlp: com.lenzbeyer.hathor.python.YtDlpService,
     private val ffmpeg: com.lenzbeyer.hathor.media.FFmpegTranscoder,
     private val tagger: com.lenzbeyer.hathor.media.ID3Tagger,
+    private val saf: SafStorage,
+    private val http: OkHttpClient,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -52,31 +57,65 @@ class JobManager @Inject constructor(
 
     fun start(playlistId: String) {
         jobScope?.cancel()
+        startService(DownloadService.ACTION_START)
         jobScope = scope.launch { runJob(playlistId) }
     }
 
     fun pause()  { _state.value = _state.value.copy(isPaused = true) }
     fun resume() { _state.value = _state.value.copy(isPaused = false) }
-    fun cancel() { jobScope?.cancel(); _state.value = JobState() }
+    fun cancel() {
+        jobScope?.cancel()
+        _state.value = JobState()
+        stopService()
+    }
 
     private suspend fun runJob(playlistId: String) {
         val maxParallel = settings.settings.first().maxParallel
-        // Snapshot once; not actively listening for upstream changes during a job.
         val tracks: List<TrackEntity> = repo.observeTracks(playlistId).first { it.isNotEmpty() }
         _state.value = JobState(
             playlistId = playlistId,
             total = tracks.size,
             done = tracks.count { it.status == TrackStatus.Done || it.status == TrackStatus.Skipped },
         )
+
+        fetchCoverIfNeeded(playlistId)
+
         val sem = Semaphore(maxParallel)
-        tracks
-            .filter { !it.status.isTerminal }
-            .map { track ->
-                scope.launch {
-                    sem.withPermit { processTrack(track) }
+        try {
+            tracks
+                .filter { !it.status.isTerminal }
+                .map { track ->
+                    scope.launch {
+                        sem.withPermit { processTrack(track) }
+                    }
                 }
+                .forEach { it.join() }
+        } finally {
+            stopService()
+        }
+    }
+
+    private suspend fun fetchCoverIfNeeded(playlistId: String) {
+        val playlist = repo.playlist(playlistId) ?: return
+        if (!playlist.coverJpgUri.isNullOrBlank()) return
+        val url = playlist.coverUrl?.takeIf { it.isNotBlank() } ?: return
+        runCatching {
+            val cacheFile = withContext(Dispatchers.IO) {
+                val f = File(ctx.cacheDir, "covers/${playlistId}.jpg").apply {
+                    parentFile?.mkdirs()
+                }
+                http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext null
+                    val body = resp.body ?: return@withContext null
+                    f.outputStream().use { sink -> body.byteStream().copyTo(sink) }
+                }
+                f.takeIf { it.length() > 0 }
+            } ?: return@runCatching
+            val savedUri = saf.writeCover(playlist.playlistFolderUri, cacheFile)
+            if (!savedUri.isNullOrBlank()) {
+                repo.setCoverJpgUri(playlistId, savedUri)
             }
-            .forEach { it.join() }
+        }
     }
 
     private suspend fun processTrack(track: TrackEntity) {
@@ -94,7 +133,12 @@ class JobManager @Inject constructor(
             repo.markStatus(track.id, TrackStatus.Tagging)
             tagger.applyTags(mp3Cache, track)
 
-            // TODO: copy mp3Cache → SAF playlistFolderUri / track filename, then setMp3Uri.
+            val playlist = repo.playlist(track.playlistId) ?: error("playlist missing")
+            val fileName = FilenameSanitizer.trackFilename(track.index, track.artist, track.title)
+            val savedUri = saf.writeMp3(playlist.playlistFolderUri, fileName, mp3Cache)
+                ?: error("Could not write file to output folder")
+            repo.setMp3Uri(track.id, savedUri)
+
             repo.markStatus(track.id, TrackStatus.Done)
             bumpDone()
         } catch (t: Throwable) {
@@ -109,5 +153,14 @@ class JobManager @Inject constructor(
             done = newDone,
             percent = if (s.total == 0) 0 else (newDone * 100 / s.total),
         )
+    }
+
+    private fun startService(action: String) {
+        val intent = Intent(ctx, DownloadService::class.java).setAction(action)
+        ContextCompat.startForegroundService(ctx, intent)
+    }
+
+    private fun stopService() {
+        ctx.stopService(Intent(ctx, DownloadService::class.java))
     }
 }

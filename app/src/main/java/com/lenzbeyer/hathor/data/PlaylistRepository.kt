@@ -31,4 +31,8 @@ class PlaylistRepository @Inject constructor(
     suspend fun touchSync(playlistId: String) {
         playlists.touchSyncTimestamp(playlistId, System.currentTimeMillis())
     }
+
+    suspend fun setCoverJpgUri(playlistId: String, uri: String?) {
+        playlists.setCoverJpgUri(playlistId, uri)
+    }
 }

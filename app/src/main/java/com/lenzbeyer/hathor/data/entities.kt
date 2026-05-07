@@ -17,7 +17,8 @@ data class PlaylistEntity(
     val genre: String?,
     val rootFolderUri: String,                   // SAF tree URI
     val playlistFolderUri: String,
-    val coverJpgUri: String?,
+    val coverUrl: String?,                       // remote URL fetched at job start
+    val coverJpgUri: String?,                    // SAF URI of saved folder.jpg, set after fetch
     val createdAt: Long,
     val lastSyncedAt: Long?,
 )

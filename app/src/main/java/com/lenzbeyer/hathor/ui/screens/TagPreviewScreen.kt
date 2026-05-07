@@ -93,15 +93,24 @@ fun TagPreviewScreen(
                     track = t,
                     onArtistChange = { vm.setTrackArtist(idx, it) },
                     onTitleChange  = { vm.setTrackTitle(idx, it) },
-                    onSkipToggle   = { vm.toggleSkip(idx) },
+                    onSkipToggle   = { vm.toggleInclude(idx) },
                 )
                 FaintDivider(Modifier.padding(horizontal = 16.dp))
             }
         }
 
+        ui.error?.let { msg ->
+            Text(
+                msg,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+
         PrimaryButton(
             text = "START DOWNLOAD",
-            onClick = { onStartDownload(draft.youtubePlaylistId) },
+            onClick = { vm.startDownload(onStartDownload) },
             modifier = Modifier.padding(16.dp),
         )
     }
@@ -145,7 +154,7 @@ private fun TrackEditRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SquareCheckbox(
-            checked = track.isSkipped,
+            checked = !track.isSkipped,
             onCheckedChange = { onSkipToggle() },
         )
         Spacer(Modifier.size(12.dp))

@@ -1,6 +1,7 @@
 package com.lenzbeyer.hathor.service
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
@@ -18,24 +19,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
-/**
- * Foreground service that hosts the download pipeline.
- *
- * Starts/stops based on whether the queue is non-empty. UI subscribes to JobManager state.
- */
 @AndroidEntryPoint
 class DownloadService : Service() {
 
     @Inject lateinit var jobManager: JobManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var collectorJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         startInForeground()
-        // TODO: collect jobManager.state and update notification with progress.
+        collectorJob = scope.launch {
+            jobManager.state.collectLatest { s ->
+                val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return@collectLatest
+                nm.notify(NOTIFICATION_ID, buildNotification(
+                    title = if (s.isPaused) "Paused" else "Downloading",
+                    status = "${s.done} / ${s.total}",
+                    progress = s.percent,
+                ))
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -64,7 +71,6 @@ class DownloadService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING,
             )
         } else {
-            // API 33: pre-mediaProcessing constant; fall back to plain startForeground.
             startForeground(NOTIFICATION_ID, notification)
         }
     }

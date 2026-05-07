@@ -24,6 +24,9 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET lastSyncedAt = :ts WHERE id = :id")
     suspend fun touchSyncTimestamp(id: String, ts: Long)
 
+    @Query("UPDATE playlists SET coverJpgUri = :uri WHERE id = :id")
+    suspend fun setCoverJpgUri(id: String, uri: String?)
+
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: String)
 }
