@@ -110,7 +110,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
-    implementation(libs.ffmpeg.kit.audio)
     implementation(libs.jaudiotagger)
 
     debugImplementation(libs.androidx.compose.ui.tooling)

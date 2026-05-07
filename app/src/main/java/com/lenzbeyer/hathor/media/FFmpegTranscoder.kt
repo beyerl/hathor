@@ -1,8 +1,7 @@
 package com.lenzbeyer.hathor.media
 
 import android.content.Context
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.ReturnCode
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -10,7 +9,22 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Thin wrapper around FFmpegKit. Per SPEC §10.1: bestaudio → MP3 320 CBR. */
+/**
+ * **STUB.** SPEC §10.1 specifies bestaudio → MP3 320 CBR via FFmpegKit.
+ *
+ * The original `com.arthenica:ffmpeg-kit-*` artifacts were delisted from Maven Central
+ * when the repo was archived in early 2025. Until a maintained fork is pinned, this
+ * transcoder copies the input file verbatim and renames it to `.mp3` so the rest of
+ * the pipeline can run end-to-end against valid file paths during development. The
+ * resulting "MP3" is whatever container yt-dlp produced (Opus / M4A) — *not* a real
+ * MP3. Do not ship a release until this is replaced.
+ *
+ * Replacement options to evaluate:
+ *  - Community fork on JitPack (e.g. `com.github.<fork>/ffmpeg-kit:6.0-2.LTS`)
+ *  - A new pin from a fresh fork that publishes to Maven Central
+ *  - Self-built AAR from the upstream archived sources
+ *  - Native MediaCodec → LAME-via-JNI alternative (large refactor)
+ */
 @Singleton
 class FFmpegTranscoder @Inject constructor(
     @ApplicationContext private val ctx: Context,
@@ -20,12 +34,12 @@ class FFmpegTranscoder @Inject constructor(
         val out = File(outDir, "${input.nameWithoutExtension}.mp3")
         if (out.exists()) out.delete()
 
-        val cmd = "-i \"${input.absolutePath}\" -vn -c:a libmp3lame -b:a 320k -id3v2_version 3 -write_xing 0 \"${out.absolutePath}\""
-        val session = FFmpegKit.execute(cmd)
-        val rc = session.returnCode
-        if (!ReturnCode.isSuccess(rc)) {
-            error("FFmpeg failed (rc=$rc): ${session.allLogsAsString.takeLast(2000)}")
-        }
+        Log.w(
+            "FFmpegTranscoder",
+            "STUB: copying ${input.name} → ${out.name} without transcoding. " +
+                "See SPEC §10.1 / §15 risk #1.",
+        )
+        input.copyTo(out, overwrite = true)
         out
     }
 }

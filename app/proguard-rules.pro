@@ -9,10 +9,6 @@
 -keep class org.jaudiotagger.** { *; }
 -dontwarn org.jaudiotagger.**
 
-# FFmpegKit native bindings
--keep class com.arthenica.** { *; }
--dontwarn com.arthenica.**
-
 # Chaquopy reflective access
 -keep class com.chaquo.python.** { *; }
 -keepclassmembers class * { @com.chaquo.python.PyObject *; }
