@@ -18,9 +18,11 @@ datastore = "1.1.1"
 coroutines = "1.9.0"
 
 okhttp = "4.12.0"
-# Transcoder uses MediaCodec (Android) + jump3r (pure-Java LAME port) since the original
-# com.arthenica:ffmpeg-kit-* artifact was delisted from Maven Central in early 2025.
-jump3r = "1.0.5"
+# Transcoder: FFmpegKit audio package. The original com.arthenica:ffmpeg-kit-* artifacts
+# were delisted from Maven Central in early 2025; we use the LTS version (still resolvable
+# from Maven Central archives / Google mirror in many cases). If the primary coordinate
+# below fails to resolve, swap to a JitPack-built fork — comment in libraries section.
+ffmpegKit = "6.0-2.LTS"
 jaudiotagger = "3.0.1"
 
 junit = "4.13.2"
@@ -63,8 +65,14 @@ okhttp-logging= { group = "com.squareup.okhttp3", name = "logging-interceptor", 
 # Jaudiotagger — official maintained fork (jthink) on Maven Central; preserves org.jaudiotagger.* packages.
 jaudiotagger = { group = "net.jthink", name = "jaudiotagger", version.ref = "jaudiotagger" }
 
-# jump3r — pure-Java LAME port. Needs a tiny javax.sound.sampled shim on Android (see app/src/main/java/javax/sound/sampled/).
-jump3r       = { group = "de.sciss", name = "jump3r", version.ref = "jump3r" }
+# FFmpegKit (audio package, ~10 MB native libs, includes libmp3lame for MP3 encoding).
+# Primary coordinate — original arthenica artifact at the last LTS:
+ffmpegkit-audio = { group = "com.arthenica", name = "ffmpeg-kit-audio", version.ref = "ffmpegKit" }
+# Fallback alternatives if the primary fails to resolve (uncomment one and adjust the
+# implementation() call in app/build.gradle.kts):
+#   { group = "com.github.tanersener", name = "ffmpeg-kit-android-lib", version.ref = "ffmpegKit" }   # JitPack build of upstream
+#   { group = "com.github.AnoopCA",    name = "FFmpegKit",              version = "audio-6.0.LTS" }   # Community fork
+#   { group = "com.antonkarpenko",     name = "ffmpegkit-audio",        version = "6.0-2.1" }         # Karpenko's republished build
 
 junit                 = { group = "junit",            name = "junit",            version.ref = "junit" }
 androidx-junit-ext    = { group = "androidx.test.ext", name = "junit",           version.ref = "junitExt" }

@@ -12,3 +12,8 @@
 # Chaquopy reflective access
 -keep class com.chaquo.python.** { *; }
 -keepclassmembers class * { @com.chaquo.python.PyObject *; }
+
+# FFmpegKit JNI — needs class names preserved to load native libs.
+-keep class com.arthenica.** { *; }
+-keep class com.arthenica.ffmpegkit.** { *; }
+-dontwarn com.arthenica.**

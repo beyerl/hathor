@@ -1,22 +1,26 @@
 package com.lenzbeyer.hathor.media
 
 import android.content.Context
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
+import android.util.Log
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.ReturnCode
 import dagger.hilt.android.qualifiers.ApplicationContext
-import de.sciss.jump3r.lowlevel.LameEncoder
-import java.io.BufferedOutputStream
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import javax.sound.sampled.AudioFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// Class is still named FFmpegTranscoder for callsite compatibility, but the implementation
-// is MediaCodec (decode → 16-bit PCM) + jump3r LameEncoder (PCM → MP3 320 CBR). Original
-// com.arthenica:ffmpeg-kit was delisted from Maven Central early 2025.
+/**
+ * Transcodes any container yt-dlp produced (Opus/M4A/WebM) to MP3 320 kbps CBR with the
+ * exact ffmpeg flag set called out in SPEC §10.1:
+ *
+ *   ffmpeg -y -i <raw> -vn -c:a libmp3lame -b:a 320k -id3v2_version 3 -write_xing 0 <out>
+ *
+ * Implementation: FFmpegKit (audio package). Replaces the earlier MediaCodec + jump3r
+ * pipeline, which couldn't run on Android because jump3r references the reserved
+ * `javax.sound.sampled` namespace, which the ART class loader refuses to resolve.
+ */
 @Singleton
 class FFmpegTranscoder @Inject constructor(
     @ApplicationContext private val ctx: Context,
@@ -26,123 +30,40 @@ class FFmpegTranscoder @Inject constructor(
         val out = File(outDir, "${input.nameWithoutExtension}.mp3")
         if (out.exists()) out.delete()
 
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(input.absolutePath)
-            val (trackIndex, inputFormat) = findAudioTrack(extractor)
-                ?: error("No audio track in ${input.name}")
-            extractor.selectTrack(trackIndex)
+        val args = arrayOf(
+            "-y",
+            "-i", input.absolutePath,
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", "320k",
+            "-id3v2_version", "3",
+            "-write_xing", "0",
+            out.absolutePath,
+        )
 
-            val mime         = inputFormat.getString(MediaFormat.KEY_MIME) ?: error("Audio track missing MIME")
-            val sampleRate   = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val channelCount = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        Log.d(LOG, "ffmpeg ${args.joinToString(" ")}")
+        val session = FFmpegKit.executeWithArguments(args)
+        val rc = session.returnCode
 
-            val decoder = MediaCodec.createDecoderByType(mime).apply {
-                configure(inputFormat, null, null, 0)
-                start()
-            }
-
-            try {
-                BufferedOutputStream(out.outputStream()).use { sink ->
-                    encode(decoder, extractor, sink, sampleRate, channelCount)
-                }
-            } finally {
-                runCatching { decoder.stop() }
-                decoder.release()
-            }
-        } finally {
-            extractor.release()
+        if (!ReturnCode.isSuccess(rc)) {
+            val tail = session.allLogsAsString
+                ?.lineSequence()
+                ?.toList()
+                ?.takeLast(20)
+                ?.joinToString("\n")
+                .orEmpty()
+            error("ffmpeg exit ${rc.value}: $tail")
         }
 
+        if (!out.exists() || out.length() == 0L) {
+            error("ffmpeg returned success but output is missing or empty: ${out.absolutePath}")
+        }
+
+        Log.d(LOG, "ffmpeg done: ${out.length()} B → ${out.name}")
         out
     }
 
-    private fun findAudioTrack(extractor: MediaExtractor): Pair<Int, MediaFormat>? {
-        for (i in 0 until extractor.trackCount) {
-            val format = extractor.getTrackFormat(i)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith("audio/")) return i to format
-        }
-        return null
-    }
-
-    private fun encode(
-        decoder: MediaCodec,
-        extractor: MediaExtractor,
-        sink: BufferedOutputStream,
-        sampleRate: Int,
-        channelCount: Int,
-    ) {
-        // MediaCodec on Android decodes to interleaved 16-bit signed little-endian PCM by default.
-        val pcmFormat = AudioFormat(
-            sampleRate.toFloat(),
-            16,
-            channelCount,
-            true,   // signed
-            false,  // little-endian
-        )
-        val channelMode = if (channelCount == 1)
-            LameEncoder.CHANNEL_MODE_MONO
-        else
-            LameEncoder.CHANNEL_MODE_STEREO
-        val encoder = LameEncoder(
-            pcmFormat,
-            320,                          // bitRate kbps
-            channelMode,
-            LameEncoder.QUALITY_HIGHEST,  // 2 — slowest, best
-            false,                        // VBR off → CBR
-        )
-        try {
-            // Generous fixed buffer: at 320 kbps the MP3 is smaller than the PCM input, so any
-            // single MediaCodec output chunk fits comfortably. Avoids depending on jump3r's
-            // (build-dependent) buffer-size accessor.
-            val mp3Buf = ByteArray(64 * 1024)
-            val info = MediaCodec.BufferInfo()
-            val timeoutUs = 10_000L
-            var inputDone  = false
-            var outputDone = false
-
-            while (!outputDone) {
-                if (!inputDone) {
-                    val inIdx = decoder.dequeueInputBuffer(timeoutUs)
-                    if (inIdx >= 0) {
-                        val inBuf = decoder.getInputBuffer(inIdx)
-                            ?: error("Decoder returned null input buffer")
-                        val read = extractor.readSampleData(inBuf, 0)
-                        if (read < 0) {
-                            decoder.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                        } else {
-                            decoder.queueInputBuffer(inIdx, 0, read, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
-                    }
-                }
-
-                var outIdx = decoder.dequeueOutputBuffer(info, timeoutUs)
-                while (outIdx >= 0) {
-                    if (info.size > 0) {
-                        val outBuf = decoder.getOutputBuffer(outIdx)
-                            ?: error("Decoder returned null output buffer")
-                        val pcmBytes = ByteArray(info.size)
-                        outBuf.position(info.offset)
-                        outBuf.get(pcmBytes, 0, info.size)
-                        val mp3Bytes = encoder.encodeBuffer(pcmBytes, 0, info.size, mp3Buf)
-                        if (mp3Bytes > 0) sink.write(mp3Buf, 0, mp3Bytes)
-                    }
-                    decoder.releaseOutputBuffer(outIdx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                        outputDone = true
-                        break
-                    }
-                    outIdx = decoder.dequeueOutputBuffer(info, 0)
-                }
-            }
-
-            val tail = encoder.encodeFinish(mp3Buf)
-            if (tail > 0) sink.write(mp3Buf, 0, tail)
-        } finally {
-            encoder.close()
-        }
+    private companion object {
+        const val LOG = "Hathor/FFmpeg"
     }
 }
