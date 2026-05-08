@@ -84,16 +84,24 @@ class TagPreviewViewModel @Inject constructor(
                 createdAt = now,
                 lastSyncedAt = null,
             )
-            val total = draft.tracks.size
+            // SPEC §8.3 / §9.3 — index and trackTotal are computed AFTER the skip-filter.
+            // Skipped tracks keep status=Skipped, get index=0 (never used at filename time),
+            // and don't count towards trackTotal.
+            val kept = draft.tracks.filterNot { it.isSkipped }
+            val keptTotal = kept.size
+            val keptIndexByVideoId = kept
+                .mapIndexed { i, t -> t.videoId to (i + 1) }
+                .toMap()
             val tracks = draft.tracks.map { t ->
+                val newIndex = keptIndexByVideoId[t.videoId] ?: 0
                 TrackEntity(
                     id = "${draft.youtubePlaylistId}:${t.videoId}",
                     playlistId = draft.youtubePlaylistId,
                     videoId = t.videoId,
-                    index = t.originalIndex,
+                    index = newIndex,
                     title = t.title,
                     artist = t.artist,
-                    trackTotal = total,
+                    trackTotal = keptTotal,
                     mp3Uri = null,
                     status = if (t.isSkipped) TrackStatus.Skipped else TrackStatus.Pending,
                     errorMessage = null,

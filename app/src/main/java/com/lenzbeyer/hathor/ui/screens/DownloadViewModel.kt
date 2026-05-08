@@ -30,4 +30,5 @@ class DownloadViewModel @Inject constructor(
     fun pause()  = jobs.pause()
     fun resume() = jobs.resume()
     fun cancel() = jobs.cancel()
+    fun retry(trackId: String) = jobs.retry(trackId)
 }

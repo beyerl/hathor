@@ -17,14 +17,20 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -37,6 +43,7 @@ import com.lenzbeyer.hathor.ui.components.SectionHeader
 import com.lenzbeyer.hathor.ui.components.SolidDivider
 import com.lenzbeyer.hathor.ui.components.SquareCheckbox
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TagPreviewScreen(
     vm: TagPreviewViewModel,
@@ -50,6 +57,9 @@ fun TagPreviewScreen(
         }
         return
     }
+
+    var sheetIndex by remember { mutableStateOf<Int?>(null) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Column(Modifier.fillMaxSize()) {
         AngularTopBar(
@@ -91,9 +101,8 @@ fun TagPreviewScreen(
             itemsIndexed(draft.tracks, key = { _, t -> t.videoId }) { idx, t ->
                 TrackEditRow(
                     track = t,
-                    onArtistChange = { vm.setTrackArtist(idx, it) },
-                    onTitleChange  = { vm.setTrackTitle(idx, it) },
                     onSkipToggle   = { vm.toggleInclude(idx) },
+                    onRowClick     = { sheetIndex = idx },
                 )
                 FaintDivider(Modifier.padding(horizontal = 16.dp))
             }
@@ -113,6 +122,40 @@ fun TagPreviewScreen(
             onClick = { vm.startDownload(onStartDownload) },
             modifier = Modifier.padding(16.dp),
         )
+    }
+
+    sheetIndex?.let { idx ->
+        val track = draft.tracks.getOrNull(idx) ?: run {
+            sheetIndex = null
+            return@let
+        }
+        ModalBottomSheet(
+            onDismissRequest = { sheetIndex = null },
+            sheetState = sheetState,
+            shape = RectangleShape,
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.padding(bottom = 24.dp)) {
+                Text(
+                    "TRACK %02d".format(track.originalIndex),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                SolidDivider()
+                Spacer(Modifier.height(8.dp))
+                LabeledField(
+                    label = "ARTIST",
+                    value = track.artist,
+                    onChange = { vm.setTrackArtist(idx, it) },
+                )
+                LabeledField(
+                    label = "TITLE",
+                    value = track.title,
+                    onChange = { vm.setTrackTitle(idx, it) },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+        }
     }
 }
 
@@ -142,9 +185,8 @@ private fun LabeledField(
 @Composable
 private fun TrackEditRow(
     track: TrackDraft,
-    onArtistChange: (String) -> Unit,
-    onTitleChange: (String) -> Unit,
     onSkipToggle: () -> Unit,
+    onRowClick: () -> Unit,
 ) {
     Row(
         Modifier
@@ -167,7 +209,7 @@ private fun TrackEditRow(
         Box(
             Modifier
                 .weight(1f)
-                .clickable { /* TODO: open per-track edit sheet */ },
+                .clickable(onClick = onRowClick),
         ) {
             Column {
                 Text(

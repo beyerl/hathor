@@ -102,7 +102,7 @@ fun DownloadScreen(
 
         LazyColumn(Modifier.fillMaxSize()) {
             items(tracks, key = { it.id }) { t ->
-                TrackProgressRow(t)
+                TrackProgressRow(t, onRetry = { vm.retry(t.id) })
                 FaintDivider(Modifier.padding(horizontal = 16.dp))
             }
         }
@@ -110,7 +110,7 @@ fun DownloadScreen(
 }
 
 @Composable
-private fun TrackProgressRow(t: TrackEntity) {
+private fun TrackProgressRow(t: TrackEntity, onRetry: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -144,7 +144,7 @@ private fun TrackProgressRow(t: TrackEntity) {
         )
         if (t.status == TrackStatus.Failed) {
             Spacer(Modifier.size(8.dp))
-            IconButton(onClick = { /* TODO: retry */ }) {
+            IconButton(onClick = onRetry) {
                 Icon(Icons.Default.Refresh, contentDescription = "Retry")
             }
         }
