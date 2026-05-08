@@ -111,17 +111,19 @@ fun DownloadScreen(
 
 @Composable
 private fun TrackProgressRow(t: TrackEntity, onRetry: () -> Unit) {
+    val isFailed = t.status == TrackStatus.Failed
+    val rowHeight = if (isFailed && !t.errorMessage.isNullOrBlank()) 72.dp else 56.dp
     Row(
         Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(rowHeight)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             statusGlyph(t.status),
             style = MaterialTheme.typography.bodyLarge,
-            color = if (t.status == TrackStatus.Failed) MaterialTheme.colorScheme.onSurface
+            color = if (isFailed) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.size(12.dp))
@@ -131,18 +133,27 @@ private fun TrackProgressRow(t: TrackEntity, onRetry: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.size(12.dp))
-        Text(
-            t.title,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                t.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (isFailed && !t.errorMessage.isNullOrBlank()) {
+                Text(
+                    t.errorMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+        }
         Text(
             t.status.name.uppercase(),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (t.status == TrackStatus.Failed) {
+        if (isFailed) {
             Spacer(Modifier.size(8.dp))
             IconButton(onClick = onRetry) {
                 Icon(Icons.Default.Refresh, contentDescription = "Retry")

@@ -6,7 +6,8 @@
       "Bash(Select-Object FullName)",
       "Bash(xargs grep -l \"Turbine\\\\|RoboElectric\\\\|Robolectric\\\\|JUnit5\")",
       "Bash(xargs -I {} find {} -type f -name \"*.ttf\" -o -name \"*.otf\")",
-      "Bash(grep -iE \"\\\\.\\(ttf|otf|xml\\)$\")"
+      "Bash(grep -iE \"\\\\.\\(ttf|otf|xml\\)$\")",
+      "Bash(git *)"
     ]
   }
 }

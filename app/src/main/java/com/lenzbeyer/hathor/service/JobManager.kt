@@ -6,6 +6,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.lenzbeyer.hathor.data.DiskFullException
 import com.lenzbeyer.hathor.data.PlaylistRepository
@@ -72,18 +73,28 @@ class JobManager @Inject constructor(
     }
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(network: Network) {
-            // Auto-pause only if user hasn't manually paused for another reason.
             val s = _state.value
-            if (!s.isPaused) pauseInternal(PauseReason.Network)
+            // Only act when there's actually a job in flight — otherwise startup network
+            // events on emulators / VPNs / radio flips would auto-pause future jobs.
+            if (s.playlistId == null) return
+            if (!s.isPaused) {
+                Log.w(LOG_JOB, "network lost — auto-pausing")
+                pauseInternal(PauseReason.Network)
+            }
         }
         override fun onAvailable(network: Network) {
             val s = _state.value
-            if (s.isPaused && s.pauseReason == PauseReason.Network) resume()
+            if (s.playlistId == null) return
+            if (s.isPaused && s.pauseReason == PauseReason.Network) {
+                Log.i(LOG_JOB, "network available — auto-resuming")
+                resume()
+            }
         }
     }
     private var networkCallbackRegistered = false
 
     fun start(playlistId: String) {
+        Log.i(LOG_JOB, "start playlist=$playlistId")
         jobScope?.cancel()
         currentPlaylistId = playlistId
         registerNetworkCallback()
@@ -142,6 +153,7 @@ class JobManager @Inject constructor(
     private suspend fun runJob(playlistId: String) {
         val maxParallel = settings.settings.first().maxParallel
         val tracks: List<TrackEntity> = repo.observeTracks(playlistId).first { it.isNotEmpty() }
+        Log.i(LOG_JOB, "runJob playlist=$playlistId tracks=${tracks.size} maxParallel=$maxParallel")
         _state.value = JobState(
             playlistId = playlistId,
             total = tracks.size,
@@ -162,6 +174,7 @@ class JobManager @Inject constructor(
                 }
                 .forEach { it.join() }
             repo.touchSync(playlistId)
+            Log.i(LOG_JOB, "runJob playlist=$playlistId completed")
         } finally {
             sem = null
             stopService()
@@ -172,11 +185,18 @@ class JobManager @Inject constructor(
         val playlist = repo.playlist(playlistId) ?: return
         if (!playlist.coverJpgUri.isNullOrBlank()) return
         val url = playlist.coverUrl?.takeIf { it.isNotBlank() } ?: return
+        Log.d(LOG_COVER, "fetching cover for $playlistId from $url")
         val cacheFile = httpDownloadWithRetry(url, File(ctx.cacheDir, "covers/${playlistId}.jpg"))
-            ?: return
+        if (cacheFile == null) {
+            Log.w(LOG_COVER, "cover fetch failed after retries for $playlistId — APIC will be skipped")
+            return
+        }
         val savedUri = saf.writeCover(playlist.playlistFolderUri, cacheFile)
         if (!savedUri.isNullOrBlank()) {
             repo.setCoverJpgUri(playlistId, savedUri)
+            Log.d(LOG_COVER, "cover saved to $savedUri")
+        } else {
+            Log.w(LOG_COVER, "writeCover returned null — folder.jpg not persisted")
         }
         cacheFile.delete()
     }
@@ -208,17 +228,22 @@ class JobManager @Inject constructor(
     }
 
     private suspend fun processTrack(track: TrackEntity) {
-        val playlist = repo.playlist(track.playlistId) ?: return
+        val playlist = repo.playlist(track.playlistId) ?: run {
+            Log.w(LOG_JOB, "track ${track.id}: playlist ${track.playlistId} not found, skipping")
+            return
+        }
         val rawCache: File?
         val mp3Cache: File?
         try {
             awaitNotPaused()
             repo.markStatus(track.id, TrackStatus.Resolving)
+            Log.d(LOG_JOB, "track ${track.id} (${track.videoId}): resolving")
 
             val fileName = FilenameSanitizer.trackFilename(track.index, track.artist, track.title)
 
             // SPEC §10.4 skip-if-exists.
             saf.findExistingMp3(playlist.playlistFolderUri, fileName)?.let { existing ->
+                Log.d(LOG_JOB, "track ${track.id}: skip-if-exists hit ($fileName, ${existing.size} B)")
                 repo.setMp3Uri(track.id, existing.uri)
                 repo.markStatus(track.id, TrackStatus.Skipped)
                 bumpDone()
@@ -227,39 +252,53 @@ class JobManager @Inject constructor(
 
             awaitNotPaused()
             repo.markStatus(track.id, TrackStatus.Downloading)
+            Log.d(LOG_JOB, "track ${track.id}: downloading audio via yt-dlp")
             rawCache = ytDlp.downloadAudio(track.videoId)
+            Log.d(LOG_JOB, "track ${track.id}: downloaded ${rawCache.length()} B → ${rawCache.name}")
 
             awaitNotPaused()
             repo.markStatus(track.id, TrackStatus.Transcoding)
+            Log.d(LOG_JOB, "track ${track.id}: transcoding to MP3 320 CBR")
             mp3Cache = ffmpeg.toMp3CBR320(rawCache)
+            Log.d(LOG_JOB, "track ${track.id}: transcoded ${mp3Cache.length()} B")
 
             awaitNotPaused()
             repo.markStatus(track.id, TrackStatus.Tagging)
+            Log.d(LOG_JOB, "track ${track.id}: tagging")
             tagger.applyTags(mp3Cache, track)
 
             awaitNotPaused()
+            Log.d(LOG_JOB, "track ${track.id}: publishing to SAF as $fileName")
             val savedUri = saf.writeMp3(playlist.playlistFolderUri, fileName, mp3Cache)
                 ?: error("Could not write file to output folder")
 
-            // SPEC §10.1 publishing — verify size matches the source we just wrote.
-            val written = saf.documentSize(savedUri)
-            if (written != mp3Cache.length()) {
-                error("SAF write size mismatch: expected ${mp3Cache.length()}, got $written")
+            // SPEC §10.1 publishing — best-effort size verification. Some devices return -1
+            // from SingleDocumentFile.length() for tree-derived doc URIs even when the write
+            // succeeded; treat negative as "unable to read", positive-mismatch as a real failure.
+            val expected = mp3Cache.length()
+            val written = runCatching { saf.documentSize(savedUri) }.getOrDefault(-1L)
+            when {
+                written < 0L -> Log.w(LOG_JOB, "track ${track.id}: post-write size unreadable (skipping verify)")
+                written != expected -> error("SAF write size mismatch: expected $expected, got $written")
+                else -> Log.d(LOG_JOB, "track ${track.id}: size verified ($written B)")
             }
 
             repo.setMp3Uri(track.id, savedUri)
             repo.markStatus(track.id, TrackStatus.Done)
             bumpDone()
+            Log.d(LOG_JOB, "track ${track.id}: DONE")
 
             // SPEC §10.1 — delete cache after successful publish.
             rawCache.delete()
             mp3Cache.delete()
         } catch (d: DiskFullException) {
             // SPEC §10.5 disk-full → pause job.
+            Log.e(LOG_JOB, "track ${track.id} failed: disk full", d)
             repo.markStatus(track.id, TrackStatus.Failed, "Disk full")
             pauseInternal(PauseReason.DiskFull)
         } catch (t: Throwable) {
-            repo.markStatus(track.id, TrackStatus.Failed, t.message ?: t.javaClass.simpleName)
+            Log.e(LOG_JOB, "track ${track.id} failed: ${t.javaClass.simpleName}: ${t.message}", t)
+            repo.markStatus(track.id, TrackStatus.Failed, "${t.javaClass.simpleName}: ${t.message ?: "unknown"}")
         }
     }
 
@@ -306,5 +345,10 @@ class JobManager @Inject constructor(
     private fun stopService() {
         ctx.stopService(Intent(ctx, DownloadService::class.java))
         unregisterNetworkCallback()
+    }
+
+    private companion object {
+        const val LOG_JOB = "Hathor/Job"
+        const val LOG_COVER = "Hathor/Cover"
     }
 }
