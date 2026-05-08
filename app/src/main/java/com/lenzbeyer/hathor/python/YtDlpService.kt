@@ -12,22 +12,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
 
-data class AudioSource(
-    val videoId: String,
-    val streamUrl: String,
-    val ext: String,
-    val durationMs: Long?,
-)
-
-/** Kotlin-side wrapper around hathor_ytdlp.py and the raw audio download (OkHttp). */
+/** Kotlin-side wrapper around hathor_ytdlp.py. */
 @Singleton
 class YtDlpService @Inject constructor(
     @ApplicationContext private val ctx: Context,
-    private val http: OkHttpClient,
 ) {
     private val py: PyObject by lazy { Python.getInstance().getModule("hathor_ytdlp") }
 
@@ -101,29 +91,15 @@ class YtDlpService @Inject constructor(
     private fun JSONObject.optStringOrNull(key: String): String? =
         if (has(key) && !isNull(key)) optString(key).takeIf { it.isNotEmpty() } else null
 
-    /** Resolves the bestaudio stream URL for a single video. */
-    suspend fun resolveAudio(videoId: String): AudioSource? = withContext(Dispatchers.IO) {
-        val raw = py.callAttr("resolve_audio_url", videoId).toString()
-        val obj = JSONObject(raw)
-        val url = obj.optString("url", "").ifBlank { return@withContext null }
-        AudioSource(
-            videoId = videoId,
-            streamUrl = url,
-            ext = obj.optString("ext", "m4a"),
-            durationMs = obj.optLong("duration", -1).takeIf { it >= 0 }?.let { it * 1000 },
-        )
-    }
-
-    /** Streams the resolved audio URL into the app cache and returns the file. */
-    suspend fun downloadStream(src: AudioSource): File = withContext(Dispatchers.IO) {
+    /** Downloads the bestaudio stream for a single video into the app cache. */
+    suspend fun downloadAudio(videoId: String): File = withContext(Dispatchers.IO) {
         val outDir = File(ctx.cacheDir, "raw").apply { mkdirs() }
-        val outFile = File(outDir, "${src.videoId}.${src.ext}")
-        val req = Request.Builder().url(src.streamUrl).build()
-        http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) error("HTTP ${resp.code} fetching audio")
-            val body = resp.body ?: error("Empty response body")
-            outFile.outputStream().use { sink -> body.byteStream().copyTo(sink) }
-        }
-        outFile
+        val raw = py.callAttr("download_audio", videoId, outDir.absolutePath).toString()
+        val obj = JSONObject(raw)
+        if (obj.has("error")) error(obj.getString("error"))
+        val path = obj.optString("path", "").ifBlank { error("yt-dlp returned no file path") }
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) error("Downloaded file missing or empty: $path")
+        file
     }
 }

@@ -6,7 +6,7 @@ so the Kotlin side does not need to traverse PyObject trees.
 
 Public functions:
   enumerate_playlist(url) -> dict
-  resolve_audio_url(video_id) -> dict | None
+  download_audio(video_id, out_dir) -> dict  (lets yt-dlp do the actual fetch)
   ytdlp_version() -> str
   update_ytdlp() -> str  (returns the new version after pip install -U)
 """
@@ -14,6 +14,7 @@ Public functions:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from typing import Any
@@ -27,13 +28,6 @@ _FLAT_OPTS = {
     "extract_flat": True,
     "skip_download": True,
     "ignoreerrors": True,
-}
-
-_AUDIO_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "skip_download": True,
-    "format": "bestaudio/best",
 }
 
 
@@ -81,23 +75,49 @@ def enumerate_playlist(url: str) -> str:
     )
 
 
-def resolve_audio_url(video_id: str) -> str:
-    """Returns JSON: { url, ext, abr, vcodec, acodec } for the chosen bestaudio stream."""
+def download_audio(video_id: str, out_dir: str) -> str:
+    """Downloads the bestaudio stream into out_dir and returns JSON with the file path.
+
+    Letting yt-dlp do the fetch is what handles n-sig deciphering, throttling
+    workarounds, and DASH/HLS reassembly — a plain HTTP GET on info["url"] stalls
+    or returns a manifest for many YouTube/YouTube Music streams.
+    """
+    os.makedirs(out_dir, exist_ok=True)
     url = f"https://www.youtube.com/watch?v={video_id}"
-    with yt_dlp.YoutubeDL(_AUDIO_OPTS) as ydl:
-        info = ydl.extract_info(url, download=False)
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "outtmpl": os.path.join(out_dir, "%(id)s.%(ext)s"),
+        "restrictfilenames": True,
+        "overwrites": True,
+        "retries": 5,
+        "fragment_retries": 5,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as e:
+        return json.dumps({"error": f"{type(e).__name__}: {e}"})
 
     if info is None:
         return json.dumps({"error": "extract_info returned None"})
 
-    # When format is bestaudio/best, yt-dlp picks one and surfaces it on the top-level dict.
+    # requested_downloads is the most reliable source of the resulting file path.
+    requested = info.get("requested_downloads") or []
+    filepath = (requested[0].get("filepath") if requested else None) or info.get("filepath")
+    if not filepath:
+        # Fall back to constructing it from outtmpl evaluation.
+        ext = info.get("ext") or "m4a"
+        filepath = os.path.join(out_dir, f"{info.get('id', video_id)}.{ext}")
+
     return json.dumps(
         {
-            "url": info.get("url"),
+            "path": filepath,
             "ext": info.get("ext"),
-            "abr": info.get("abr"),
-            "acodec": info.get("acodec"),
-            "vcodec": info.get("vcodec"),
             "duration": info.get("duration"),
         }
     )

@@ -120,12 +120,8 @@ class JobManager @Inject constructor(
 
     private suspend fun processTrack(track: TrackEntity) {
         try {
-            repo.markStatus(track.id, TrackStatus.Resolving)
-            val source = ytDlp.resolveAudio(track.videoId)
-                ?: error("Could not resolve audio stream")
-
             repo.markStatus(track.id, TrackStatus.Downloading)
-            val rawCache = ytDlp.downloadStream(source)
+            val rawCache = ytDlp.downloadAudio(track.videoId)
 
             repo.markStatus(track.id, TrackStatus.Transcoding)
             val mp3Cache = ffmpeg.toMp3CBR320(rawCache)
